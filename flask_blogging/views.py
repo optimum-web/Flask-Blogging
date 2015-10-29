@@ -208,7 +208,7 @@ def editor(post_id):
                 if post_id is not None:
                     post = storage.get_post_by_id(post_id)
                     if (post is not None) and \
-                            (self.is_author(post['user_id'])):
+                            (is_author(post['user_id'])):
                         tags = ", ".join(post["tags"])
                         form = BlogEditor(title=post["title"],
                                           text=post["text"], tags=tags)
@@ -240,7 +240,7 @@ def delete(post_id):
             storage = blogging_engine.storage
             post = storage.get_post_by_id(post_id)
             if (post is not None) and \
-                    (self.is_author(post["user_id"])):
+                    (is_author(post["user_id"])):
                 success = storage.delete_post(post_id)
                 if success:
                     flash("Your post was successfully deleted", "info")
