@@ -54,7 +54,7 @@ class PostProcessor(object):
 
     @classmethod
     def is_author(cls, post):
-        return current_user.get_id() == post['user_id']
+        return current_user.get_id() == int(post['user_id'])
 
     @classmethod
     def process(cls, post, render=True):

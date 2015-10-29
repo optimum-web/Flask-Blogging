@@ -172,7 +172,7 @@ def posts_by_author(user_id, count, page):
                            config=config)
 
 def is_author(post):
-    return current_user.get_id() == post['user_id']
+    return current_user.get_id() == int(post['user_id'])
 
 @login_required
 def editor(post_id):
