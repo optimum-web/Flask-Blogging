@@ -171,8 +171,8 @@ def posts_by_author(user_id, count, page):
     return render_template("blogging/index.html", posts=posts, meta=meta,
                            config=config)
 
-def is_author(post):
-    return current_user.get_id() == int(post['user_id'])
+def is_author(id):
+    return current_user.get_id() == int(id)
 
 @login_required
 def editor(post_id):
