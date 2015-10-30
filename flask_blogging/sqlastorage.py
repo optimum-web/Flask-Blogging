@@ -7,6 +7,7 @@ import sqlalchemy as sqla
 import datetime
 from .storage import Storage
 
+from sqlalchemy.dialects import postgresql
 
 class SQLAStorage(Storage):
     """
@@ -101,12 +102,12 @@ class SQLAStorage(Storage):
                 post_statement = \
                     self._post_table.insert() if post_id is None else \
                     self._post_table.update().where(
-                        self._post_table.c.id == post_id)
+                        self._post_table.c.id == int(post_id))
                 post_statement = post_statement.values(
                     title=title, text=text, post_date=post_date,
                     last_modified_date=last_modified_date, draft=draft
                 )
-
+                
                 post_result = conn.execute(post_statement)
                 post_id = post_result.inserted_primary_key[0] \
                     if post_id is None else post_id
@@ -299,28 +300,47 @@ class SQLAStorage(Storage):
         return sql_filter
 
     def _save_tags(self, tags, post_id, conn):
+        
         tags = self.normalize_tags(tags)
         tag_insert_statement = self._tag_table.insert()
         tag_ids = []
+        
         for tag in tags:
             try:
-                tag_insert_statement = tag_insert_statement.values(text=tag)
-                result = conn.execute(tag_insert_statement)
-                tag_id = result.inserted_primary_key[0]
+                statement = self._tag_table.select().where(self._tag_table.c.text == tag)
+                tag_result = conn.execute(statement).fetchone()
+                if tag_result is None:
+                    tag_insert_statement = tag_insert_statement.values(text=tag)
+                    result = conn.execute(tag_insert_statement)
+                    tag_id = result.inserted_primary_key[0]
+                else:
+                    tag_id = tag_result[0]
             except sqla.exc.IntegrityError as e:
-                tag_select_statement = sqla.select([self._tag_table]).where(
-                    self._tag_table.c.text == tag)
-                result = conn.execute(tag_select_statement).fetchone()
-                tag_id = result[0]
+                tag_result = conn.execute(self._tag_table.select().where(self._tag_table.c.text == tag)).fetchone()
+                tag_id = tag_result[0]
+
+            except Exception as e:
+                pass
+            
             tag_ids.append(tag_id)
+             
             try:
-                tag_post_statement = self._tag_posts_table.insert().values(
-                    tag_id=tag_id, post_id=post_id)
-                conn.execute(tag_post_statement)
+                statement = self._tag_posts_table.select().where(
+                    sqla.and_(self._tag_posts_table.c.tag_id == tag_id,
+                    self._tag_posts_table.c.post_id == post_id)
+                )
+                
+                tag_post_result = conn.execute(statement).fetchone()
+
+                if tag_post_result is None:   
+                    tag_post_statement = self._tag_posts_table.insert().values(
+                        tag_id=tag_id, post_id=post_id)
+                    conn.execute(tag_post_statement)
             except sqla.exc.IntegrityError as e:
                 pass
             except Exception as e:
                 self._logger.exception(str(e))
+            
         try:
             statement = self._tag_posts_table.delete().where(
                 sqla.and_(sqla.not_(
@@ -334,9 +354,11 @@ class SQLAStorage(Storage):
 
     def _save_user_post(self, user_id, post_id, conn):
         user_id = str(user_id)
+        
         statement = sqla.select([self._user_posts_table]).where(
             self._user_posts_table.c.post_id == post_id)
         result = conn.execute(statement).fetchone()
+
         if result is None:
             try:
                 statement = self._user_posts_table.insert().values(
