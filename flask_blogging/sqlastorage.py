@@ -6,8 +6,15 @@ import logging
 import sqlalchemy as sqla
 import datetime
 from .storage import Storage
-
+from .models import *
+from .views import get_locale
+from flask import session , g
+from sqlalchemy.orm import sessionmaker
+import sqlalchemy_utils
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import joinedload
+from flask.ext.babel import gettext
+
 
 class SQLAStorage(Storage):
     """
@@ -40,11 +47,12 @@ class SQLAStorage(Storage):
             self._metadata = db.metadata
         else:
             if engine is None:
-                raise ValueError("Both db and engine args cannot be None")
+                raise ValueError(gettext(u"Both db and engine args cannot be None"))
             self._engine = engine
             self._metadata = metadata or sqla.MetaData()
         self._table_prefix = table_prefix
         self._metadata.reflect(bind=self._engine)
+
         self._create_all_tables()
 
     @property
@@ -96,21 +104,30 @@ class SQLAStorage(Storage):
                 if post_id is not None:  # validate post_id
                     exists_statement = sqla.select([self._post_table]).where(
                         self._post_table.c.id == post_id)
-                    exists = \
-                        conn.execute(exists_statement).fetchone() is not None
+                    exists = conn.execute(exists_statement).fetchone() is not None
                     post_id = post_id if exists else None
-                post_statement = \
-                    self._post_table.insert() if post_id is None else \
-                    self._post_table.update().where(
-                        self._post_table.c.id == int(post_id))
-                post_statement = post_statement.values(
-                    title=title, text=text, post_date=post_date,
-                    last_modified_date=last_modified_date, draft=draft
-                )
-                
-                post_result = conn.execute(post_statement)
-                post_id = post_result.inserted_primary_key[0] \
+
+                if post_id is None:
+                    current_post = Post( title = title , text = text ,
+                                  post_date = post_date , last_modified_date = last_modified_date
+                                 ,draft = draft )
+                    if get_locale() is not current_post.get_locale():
+                        current_post.translations[current_post.get_locale()].title = title
+                        current_post.translations[current_post.get_locale()].text = text
+                else:
+                    current_post = self._session.query(Post).options(sqla.orm.joinedload(Post.current_translation)).filter(Post.id == int(post_id)).first()
+                    current_post.title = title;
+                    current_post.text = text;
+                    current_post.post_date = post_date;
+                    current_post.last_modified = last_modified_date;
+                    current_post.draft = draft;
+
+                self._session.add(current_post)
+                self._session.commit()
+
+                post_id = current_post.id \
                     if post_id is None else post_id
+
                 self._save_tags(tags, post_id, conn)
                 self._save_user_post(user_id, post_id, conn)
             except Exception as e:
@@ -130,15 +147,16 @@ class SQLAStorage(Storage):
         r = None
         with self._engine.begin() as conn:
             try:
-                post_statement = sqla.select([self._post_table]).where(
-                    self._post_table.c.id == post_id
-                )
-                post_result = conn.execute(post_statement).fetchone()
+                post_result = self._session.query(Post).options(sqla.orm.joinedload(Post.current_translation))\
+                    .filter(Post.id == post_id).first()
+
                 if post_result is not None:
-                    r = dict(post_id=post_result[0], title=post_result[1],
-                             text=post_result[2], post_date=post_result[3],
-                             last_modified_date=post_result[4],
-                             draft=post_result[5])
+
+                    r = dict(post_id = post_result.id , title = post_result.title,
+                             text = post_result.text , post_date = post_result.post_date,
+                             last_modified_date = post_result.last_modified_date,
+                             draft = post_result.draft)
+
                     # get the tags
                     tag_statement = sqla.select([self._tag_table.c.text]). \
                         where(
@@ -190,8 +208,7 @@ class SQLAStorage(Storage):
         with self._engine.begin() as conn:
             try:
                 select_statement = sqla.select([self._post_table.c.id])
-                sql_filter = self._get_filter(tag, user_id, include_draft,
-                                              conn)
+                sql_filter = self._get_filter(tag, user_id, include_draft,conn)
 
                 if sql_filter is not None:
                     select_statement = select_statement.where(sql_filter)
@@ -202,6 +219,7 @@ class SQLAStorage(Storage):
 
                 select_statement = select_statement.order_by(ordering)
                 result = conn.execute(select_statement).fetchall()
+
             except Exception as e:
                 self._logger.exception(str(e))
                 result = []
@@ -300,11 +318,11 @@ class SQLAStorage(Storage):
         return sql_filter
 
     def _save_tags(self, tags, post_id, conn):
-        
+
         tags = self.normalize_tags(tags)
         tag_insert_statement = self._tag_table.insert()
         tag_ids = []
-        
+
         for tag in tags:
             try:
                 statement = self._tag_table.select().where(self._tag_table.c.text == tag)
@@ -321,18 +339,18 @@ class SQLAStorage(Storage):
 
             except Exception as e:
                 pass
-            
+
             tag_ids.append(tag_id)
-             
+
             try:
                 statement = self._tag_posts_table.select().where(
                     sqla.and_(self._tag_posts_table.c.tag_id == tag_id,
                     self._tag_posts_table.c.post_id == post_id)
                 )
-                
+
                 tag_post_result = conn.execute(statement).fetchone()
 
-                if tag_post_result is None:   
+                if tag_post_result is None:
                     tag_post_statement = self._tag_posts_table.insert().values(
                         tag_id=tag_id, post_id=post_id)
                     conn.execute(tag_post_statement)
@@ -340,7 +358,7 @@ class SQLAStorage(Storage):
                 pass
             except Exception as e:
                 self._logger.exception(str(e))
-            
+
         try:
             statement = self._tag_posts_table.delete().where(
                 sqla.and_(sqla.not_(
@@ -354,7 +372,7 @@ class SQLAStorage(Storage):
 
     def _save_user_post(self, user_id, post_id, conn):
         user_id = str(user_id)
-        
+
         statement = sqla.select([self._user_posts_table]).where(
             self._user_posts_table.c.post_id == post_id)
         result = conn.execute(statement).fetchone()
@@ -384,10 +402,22 @@ class SQLAStorage(Storage):
         Creates all the required tables by calling the required functions.
         :return:
         """
+        #create database and session
+        Base.metadata.create_all(self._engine)
+        # create a configured "Session" class
+        Session = sessionmaker(bind = self._engine)
+        # create a Session
+        self._session = Session()
+        self._session.rollback()
+
         self._create_post_table()
         self._create_tag_table()
         self._create_tag_posts_table()
         self._create_user_posts_table()
+
+    def _create_post_translation_table(self):
+
+        pass
 
     def _create_post_table(self):
         """
@@ -397,21 +427,12 @@ class SQLAStorage(Storage):
         with self._engine.begin() as conn:
             post_table_name = self._table_name("post")
             if not conn.dialect.has_table(conn, post_table_name):
-                self._post_table = sqla.Table(
-                    post_table_name, self._metadata,
-                    sqla.Column("id", sqla.Integer, primary_key=True),
-                    sqla.Column("title", sqla.String(256)),
-                    sqla.Column("text", sqla.Text),
-                    sqla.Column("post_date", sqla.DateTime),
-                    sqla.Column("last_modified_date", sqla.DateTime),
-                    # if 1 then make it a draft
-                    sqla.Column("draft", sqla.SmallInteger, default=0)
-
-                )
+                self._post_table = Post.__table__
                 self._logger.debug("Created table with table name %s" %
                                    post_table_name)
             else:
-                self._post_table = self._metadata.tables[post_table_name]
+                #self._post_table = self._metadata.tables[post_table_name]
+                self._post_table = Post.__table__
                 self._logger.debug("Reflecting to table with table name %s" %
                                    post_table_name)
 
@@ -432,6 +453,7 @@ class SQLAStorage(Storage):
                 self._logger.debug("Created table with table name %s" %
                                    tag_table_name)
             else:
+                #self._tag_table = self._metadata.tables[tag_table_name]
                 self._tag_table = self._metadata.tables[tag_table_name]
                 self._logger.debug("Reflecting to table with table name %s" %
                                    tag_table_name)

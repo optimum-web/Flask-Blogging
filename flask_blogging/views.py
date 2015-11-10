@@ -11,16 +11,16 @@ import math
 from werkzeug.contrib.atom import AtomFeed
 import datetime
 from flask.ext.principal import PermissionDenied
-
+import sqlalchemy_utils
+from flask import session
+from flask.ext.babel import gettext
 
 def _get_blogging_engine(app):
     return app.extensions["FLASK_BLOGGING_ENGINE"]
 
-
 def _get_user_name(user):
     user_name = user.get_name() if hasattr(user, "get_name") else str(user)
     return user_name
-
 
 def _clear_cache(cache):
     cache.delete_memoized(index)
@@ -29,7 +29,6 @@ def _clear_cache(cache):
     cache.delete_memoized(posts_by_tag)
     cache.delete_memoized(sitemap)
     cache.delete_memoized(feed)
-
 
 def _store_form_data(blog_form, storage, user, post):
     title = blog_form.title.data
@@ -129,7 +128,7 @@ def page_by_id(post_id, slug):
         return render_template("blogging/page.html", post=post, config=config,
                                meta=meta)
     else:
-        flash("The page you are trying to access is not valid!", "warning")
+        flash(gettext(u"The page you are trying to access is not valid!"), gettext(u"warning"))
         return redirect(url_for("blogging.index"))
 
 
@@ -167,12 +166,21 @@ def posts_by_author(user_id, count, page):
         for post in posts:
             blogging_engine.process_post(post, render=render)
     else:
-        flash("No posts found for this user!", "warning")
+        flash(gettext(u"No posts found for this user!"), gettext(u"warning"))
     return render_template("blogging/index.html", posts=posts, meta=meta,
                            config=config)
 
 def is_author(id):
     return current_user.get_id() == int(id)
+
+def get_locale():
+    if 'locale' in session:
+        return session['locale']
+    else:
+       return 'en'
+
+def set_locale():
+    sqlalchemy_utils.i18n.get_locale = get_locale
 
 @login_required
 def editor(post_id):
@@ -196,12 +204,12 @@ def editor(post_id):
                     else:
                         post = {}
                     pid = _store_form_data(form, storage, current_user, post)
-                    flash("Blog posted successfully!", "info")
+                    flash(gettext(u"Blog posted successfully!"), gettext(u"info"))
                     slug = post_processor.create_slug(form.title.data)
                     return redirect(url_for("blogging.page_by_id", post_id=pid,
                                             slug=slug))
                 else:
-                    flash("There were errors in blog submission", "warning")
+                    flash(gettext(u"There were errors in blog submission"), gettext(u"warning"))
                     return render_template("blogging/editor.html", form=form,
                                            post_id=post_id, config=config)
             else:
@@ -216,8 +224,8 @@ def editor(post_id):
                                                form=form, post_id=post_id,
                                                config=config)
                     else:
-                        flash("You do not have the rights to edit this post",
-                              "warning")
+                        flash(gettext(u"You do not have the rights to edit this post"),
+                              gettext(u"warning"))
                         return redirect(url_for("blogging.index",
                                                 post_id=None))
 
@@ -225,7 +233,7 @@ def editor(post_id):
             return render_template("blogging/editor.html", form=form,
                                    post_id=post_id, config=config)
     except PermissionDenied:
-        flash("You do not have permissions to create or edit posts", "warning")
+        flash(gettext(u"You do not have permissions to create or edit posts"), gettext(u"warning"))
         return redirect(url_for("blogging.index", post_id=None))
 
 
@@ -243,16 +251,16 @@ def delete(post_id):
                     (is_author(post["user_id"])):
                 success = storage.delete_post(post_id)
                 if success:
-                    flash("Your post was successfully deleted", "info")
+                    flash(gettext("Your post was successfully deleted"), gettext("info"))
                 else:
-                    flash("There were errors while deleting your post",
-                          "warning")
+                    flash(gettext(u"There were errors while deleting your post"),
+                          gettext(u"warning"))
             else:
-                flash("You do not have the rights to delete this post",
-                      "warning")
+                flash(gettext(u"You do not have the rights to delete this post"),
+                      gettext(u"warning"))
             return redirect(url_for("blogging.index"))
     except PermissionDenied:
-        flash("You do not have permissions to delete posts", "warning")
+        flash(gettext(u"You do not have permissions to delete posts"), gettext(u"warning"))
         return redirect(url_for("blogging.index", post_id=None))
 
 
@@ -375,5 +383,9 @@ def create_blueprint(import_name, blogging_engine):
     # register feed
     feed_func = cached_func(blogging_engine, feed)
     blog_app.add_url_rule('/feeds/all.atom.xml', view_func=feed_func)
+
+    #register before app request
+    # to set the language for sqlalchemy plugin
+    blog_app.before_app_request(set_locale)
 
     return blog_app
