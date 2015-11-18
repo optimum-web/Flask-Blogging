@@ -92,6 +92,15 @@ class BloggingEngine(object):
                 self._blogger_permission = Permission()
         return self._blogger_permission
 
+    def admin_permision(self):
+        if self._blogger_permission is None:
+            if self.config.get("BLOGGING_PERMISSIONS", False):
+                self._admin_permission = Permission(RoleNeed("admin"))
+            else:
+                self._admin_permission = Permission()
+
+        return self._admin_permission
+
     def user_loader(self, callback):
         """
         The decorator for loading the user.

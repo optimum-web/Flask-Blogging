@@ -88,6 +88,7 @@ def _is_blogger(blogger_permission):
     return is_blogger
 
 
+
 def index(count, page):
     """
     Serves the page with a list of blog posts
@@ -171,7 +172,14 @@ def posts_by_author(user_id, count, page):
                            config=config)
 
 def is_author(id):
-    return current_user.get_id() == int(id)
+    currentAuthor = False
+    if id is not None:
+        currentAuthor = current_user.get_id() == int(id)
+
+    blogging_engine = _get_blogging_engine(current_app)
+    author = currentAuthor or blogging_engine.admin_permision.require().can()
+
+    return author
 
 def get_locale():
     if 'locale' in session:
