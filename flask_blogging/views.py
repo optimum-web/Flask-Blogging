@@ -215,8 +215,7 @@ def editor(post_id):
                     pid = _store_form_data(form, storage, current_user, post)
                     flash(gettext(u"Blog posted successfully!"), gettext(u"info"))
                     slug = post_processor.create_slug(form.title.data)
-                    return redirect(url_for("blogging.page_by_id", post_id=pid,
-                                            slug=slug))
+                    return redirect(url_for("blogging.page_by_id", post_id=pid))
                 else:
                     flash(gettext(u"There were errors in blog submission"), gettext(u"warning"))
                     return render_template("blogging/editor.html", form=form,

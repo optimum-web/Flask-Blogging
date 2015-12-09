@@ -42,13 +42,12 @@ class PostProcessor(object):
 
     @classmethod
     def construct_url(cls, post):
-        url = url_for("blogging.page_by_id", post_id=post["post_id"],
-                      slug=cls.create_slug(post["title"]))
+        url = url_for("blogging.page_by_id", post_id = post["post_id"])
         return url
 
     @classmethod
     def render_text(cls, post):
-        md = markdown.Markdown(extensions=cls.all_extensions())
+        md = markdown.Markdown(extensions = cls.all_extensions())
         post["rendered_text"] = md.convert(post["text"])
         post["meta"] = md.Meta
 
